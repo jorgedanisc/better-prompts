@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import fuzzysort from 'fuzzysort';
 
 const execAsync = promisify(exec);
 
@@ -40,6 +41,19 @@ export function activate(context: vscode.ExtensionContext) {
         return uris.map(uri => vscode.workspace.asRelativePath(uri, false));
     }
 
+    const fileCache = new Map<string, { time: number, paths: string[] }>();
+    const CACHE_TTL = 10000; // 10 seconds cache to keep keystrokes fast
+    
+    async function getCachedWorkspaceFiles(workspaceRoot: string): Promise<string[]> {
+        const cached = fileCache.get(workspaceRoot);
+        if (cached && Date.now() - cached.time < CACHE_TTL) {
+            return cached.paths;
+        }
+        const paths = await getWorkspaceFiles(workspaceRoot);
+        fileCache.set(workspaceRoot, { time: Date.now(), paths });
+        return paths;
+    }
+
     // Autocomplete Provider
     const provider = vscode.languages.registerCompletionItemProvider(
         { pattern: '**/*.prompt.md' }, 
@@ -57,17 +71,52 @@ export function activate(context: vscode.ExtensionContext) {
                     return undefined;
                 }
 
+                const query = word.startsWith('@') ? word.slice(1) : word;
                 const homeDir = os.homedir();
                 const completionItems: vscode.CompletionItem[] = [];
 
                 const folders = vscode.workspace.workspaceFolders || [];
                 for (const folder of folders) {
                     const rootPath = folder.uri.fsPath;
-                    const relativePaths = await getWorkspaceFiles(rootPath);
+                    const relativePaths = await getCachedWorkspaceFiles(rootPath);
                     
                     const uniqueDirs = new Set<string>();
-
                     for (const relPath of relativePaths) {
+                        let dir = path.dirname(relPath);
+                        while (dir !== '.' && dir !== '' && dir !== '/') {
+                            uniqueDirs.add(dir);
+                            dir = path.dirname(dir);
+                        }
+                    }
+                    
+                    const allPaths = [...relativePaths, ...Array.from(uniqueDirs)];
+                    const pathObjects = allPaths.map(p => ({
+                        path: p,
+                        basename: path.basename(p)
+                    }));
+
+                    let fuzzResults;
+                    if (query.length > 0) {
+                        fuzzResults = fuzzysort.go(query, pathObjects, {
+                            keys: ['basename', 'path'],
+                            limit: 100,
+                            scoreFn: (a) => {
+                                let score = a.score;
+                                // If the query matched inside the basename (a[0] is not null),
+                                // apply a massive "filename bonus" to completely outrank path-only matches.
+                                if (a[0] !== null) {
+                                    score += 10000; 
+                                }
+                                return score;
+                            }
+                        }).map(r => r.obj.path);
+                    } else {
+                        // Return first 100 files if query is empty
+                        fuzzResults = allPaths.slice(0, 100);
+                    }
+
+                    for (let i = 0; i < fuzzResults.length; i++) {
+                        const relPath = fuzzResults[i];
                         const absolutePath = path.join(rootPath, relPath);
                         
                         let displayPath = absolutePath;
@@ -75,49 +124,33 @@ export function activate(context: vscode.ExtensionContext) {
                             displayPath = displayPath.replace(homeDir, '');
                         }
                         
+                        const isDir = uniqueDirs.has(relPath);
+                        const kind = isDir ? vscode.CompletionItemKind.Folder : vscode.CompletionItemKind.File;
+                        
                         const label = relPath;
-                        const item = new vscode.CompletionItem(label, vscode.CompletionItemKind.File);
+                        const item = new vscode.CompletionItem(label, kind);
                         
                         item.range = wordRange;
-                        item.filterText = `@${label}`;
+                        
+                        // We must format the text so VS Code doesn't filter it out
+                        // The user's query might be fragments, but we guarantee it matches.
+                        item.filterText = word; 
+                        
                         item.insertText = `@/~${displayPath}`;
                         item.detail = `~${displayPath}`;
                         
-                        completionItems.push(item);
-
-                        // Extract directories recursively
-                        let dir = path.dirname(relPath);
-                        while (dir !== '.' && dir !== '' && dir !== '/') {
-                            uniqueDirs.add(dir);
-                            dir = path.dirname(dir);
-                        }
-                    }
-
-                    // Add unique folders to the autocomplete
-                    for (const dirRelPath of uniqueDirs) {
-                        const absolutePath = path.join(rootPath, dirRelPath);
-                        let displayPath = absolutePath;
-                        if (displayPath.startsWith(homeDir)) {
-                            displayPath = displayPath.replace(homeDir, '');
-                        }
-                        
-                        const label = dirRelPath;
-                        const item = new vscode.CompletionItem(label, vscode.CompletionItemKind.Folder);
-                        
-                        item.range = wordRange;
-                        item.filterText = `@${label}`;
-                        item.insertText = `@/~${displayPath}`;
-                        item.detail = `~${displayPath}`;
+                        // Force VS Code to respect exactly fuzzysort's index
+                        item.sortText = i.toString().padStart(5, '0');
                         
                         completionItems.push(item);
                     }
                 }
 
                 outputChannel.appendLine(`Returned ${completionItems.length} completion items in ${Date.now() - startTime}ms`);
-                return completionItems;
+                return new vscode.CompletionList(completionItems, true);
             }
         },
-        '@' 
+        '@', '/', '.', '-', '_', '$'
     );
     context.subscriptions.push(provider);
 
