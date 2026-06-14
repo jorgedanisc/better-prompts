@@ -3,6 +3,7 @@
   "displayName": "Better Prompts",
   "description": "Autocomplete file paths in .prompt.md files using @",
   "version": "0.0.1",
+  "license": "MIT",
   "publisher": "jorgesoares",
   "repository": {
     "type": "git",
