@@ -1,0 +1,10 @@
+{
+  "scopeName": "markdown.prompt.alias.injection",
+  "injectionSelector": "L:text.html.markdown",
+  "patterns": [
+    {
+      "match": "(@\\/~\\/[a-zA-Z0-9_\\-\\.\\/\\(\\)\\$]+)",
+      "name": "markup.inline.raw.string.markdown"
+    }
+  ]
+}

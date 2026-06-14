@@ -1,0 +1,72 @@
+{
+  "name": "better-prompts",
+  "displayName": "Better Prompts",
+  "description": "Autocomplete file paths in .prompt.md files using @",
+  "version": "0.0.1",
+  "publisher": "jorgesoares",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jorgesoares/better-prompts"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:markdown"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Better Prompts",
+      "properties": {
+        "better-prompts.promptLocation": {
+          "type": "string",
+          "default": "~/Library/prompts",
+          "description": "The directory where new prompt files are created."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "better-prompts.newPromptFile",
+        "title": "Better Prompts: New Prompt File",
+        "icon": "$(plus)"
+      },
+      {
+        "command": "better-prompts.changePromptLocation",
+        "title": "Better Prompts: Change Prompt Location"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "better-prompts.newPromptFile",
+          "group": "navigation"
+        }
+      ]
+    },
+    "grammars": [
+      {
+        "scopeName": "markdown.prompt.alias.injection",
+        "path": "./syntaxes/prompt.injection.json",
+        "injectTo": ["text.html.markdown"]
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "yes | bunx vsce package"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "@types/node": "18.x",
+    "typescript": "^5.1.3",
+    "@vscode/vsce": "^2.31.1"
+  }
+}
