@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import fuzzysort from 'fuzzysort';
+import { clearTimeout, setTimeout } from 'timers';
 
 const execAsync = promisify(exec);
 
@@ -67,7 +68,7 @@ export function activate(context: vscode.ExtensionContext) {
                 }
                 const word = document.getText(wordRange);
 
-                if (!word.startsWith('@')) {
+                if (!word.startsWith('@') || word.startsWith('@/~')) {
                     return undefined;
                 }
 
@@ -136,7 +137,7 @@ export function activate(context: vscode.ExtensionContext) {
                         // The user's query might be fragments, but we guarantee it matches.
                         item.filterText = word; 
                         
-                        item.insertText = `@/~${displayPath}`;
+                        item.insertText = new vscode.SnippetString(`@/~${displayPath} $0`);
                         item.detail = `~${displayPath}`;
                         
                         // Force VS Code to respect exactly fuzzysort's index
@@ -216,6 +217,29 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
     context.subscriptions.push(changeLocationCmd);
+
+    // 4. Auto-trigger suggest when navigating into an alias
+    let triggerSuggestTimeout: NodeJS.Timeout | undefined;
+    context.subscriptions.push(
+        vscode.window.onDidChangeTextEditorSelection(e => {
+            const editor = e.textEditor;
+            if (!editor.document.fileName.endsWith('.prompt.md')) return;
+
+            if (e.selections.length === 1 && e.selections[0].isEmpty) {
+                const position = e.selections[0].active;
+                const wordRange = editor.document.getWordRangeAtPosition(position, /@[^\s]*/);
+                if (wordRange) {
+                    const word = editor.document.getText(wordRange);
+                    if (word.startsWith('@') && !word.startsWith('@/~')) {
+                        if (triggerSuggestTimeout) clearTimeout(triggerSuggestTimeout);
+                        triggerSuggestTimeout = setTimeout(() => {
+                            vscode.commands.executeCommand('editor.action.triggerSuggest');
+                        }, 50); // Small debounce
+                    }
+                }
+            }
+        })
+    );
 }
 
 export function deactivate() {}
