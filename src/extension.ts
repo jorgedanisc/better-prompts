@@ -96,7 +96,7 @@ export function activate(context: vscode.ExtensionContext) {
                         basename: path.basename(p)
                     }));
 
-                    let fuzzResults;
+                    let fuzzResults: { path: string; indexes?: number[] }[];
                     if (query.length > 0) {
                         fuzzResults = fuzzysort.go(query, pathObjects, {
                             keys: ['basename', 'path'],
@@ -110,14 +110,17 @@ export function activate(context: vscode.ExtensionContext) {
                                 }
                                 return score;
                             }
-                        }).map(r => r.obj.path);
+                        }).map(r => ({
+                            path: r.obj.path,
+                            indexes: r[1] ? (r[1].indexes as number[]) : undefined
+                        }));
                     } else {
                         // Return first 100 files if query is empty
-                        fuzzResults = allPaths.slice(0, 100);
+                        fuzzResults = allPaths.slice(0, 100).map(p => ({ path: p }));
                     }
 
                     for (let i = 0; i < fuzzResults.length; i++) {
-                        const relPath = fuzzResults[i];
+                        const { path: relPath, indexes } = fuzzResults[i];
                         const absolutePath = path.join(rootPath, relPath);
                         
                         let displayPath = absolutePath;
@@ -128,8 +131,11 @@ export function activate(context: vscode.ExtensionContext) {
                         const isDir = uniqueDirs.has(relPath);
                         const kind = isDir ? vscode.CompletionItemKind.Folder : vscode.CompletionItemKind.File;
                         
-                        const label = relPath;
-                        const item = new vscode.CompletionItem(label, kind);
+                        const shortened = getShortenedPath(relPath, indexes);
+                        const item = new vscode.CompletionItem({
+                            label: shortened,
+                            description: relPath !== shortened ? relPath : undefined
+                        }, kind);
                         
                         item.range = wordRange;
                         
@@ -243,3 +249,48 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {}
+
+function getShortenedPath(relPath: string, matchedIndices: number[] | undefined, maxLength: number = 40): string {
+    const L = relPath.length;
+    if (L <= maxLength) {
+        return relPath;
+    }
+
+    // Allocate 6 characters for possible '...' at start and/or end
+    const W = maxLength - 6;
+
+    if (!matchedIndices || matchedIndices.length === 0) {
+        const startIdx = L - W;
+        return '...' + relPath.slice(startIdx);
+    }
+
+    const sortedIndices = [...matchedIndices].sort((a, b) => a - b);
+    const firstMatch = sortedIndices[0];
+    const lastMatch = sortedIndices[sortedIndices.length - 1];
+    const matchCenter = (firstMatch + lastMatch) / 2;
+
+    let startIdx = Math.floor(matchCenter - W / 2);
+    
+    // Ensure we have at least 10 characters after lastMatch
+    const minPaddingEnd = Math.min(L, lastMatch + 1 + 10);
+    if (startIdx + W < minPaddingEnd) {
+        startIdx = minPaddingEnd - W;
+    }
+    
+    
+    
+    // Bound within [0, L - W]
+    if (startIdx < 0) {
+        startIdx = 0;
+    }
+    if (startIdx > L - W) {
+        startIdx = L - W;
+    }
+    
+    const endIdx = startIdx + W;
+
+    const prefix = startIdx > 0 ? '...' : '';
+    const suffix = endIdx < L ? '...' : '';
+
+    return prefix + relPath.slice(startIdx, endIdx) + suffix;
+}
